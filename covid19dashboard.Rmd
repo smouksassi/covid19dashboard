@@ -1,0 +1,578 @@
+---
+title: "COVID-19: Cases Dashboard"
+runtime: shiny
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme: spacelab
+---
+<style> .datatables{overflow: auto;}</style>
+
+```{r global, include=FALSE}
+library(rmarkdown)
+library(tidyverse)
+library(lubridate)
+library(ggthemes)
+library(scales)
+library(knitr)
+library(flexdashboard)
+library(shiny)
+library(shinyWidgets)
+library(formattable)
+library(plotly)
+library(shiny)
+library(DT)
+library(sparkline)
+library(htmlwidgets)
+library(shinycssloaders)
+library(data.table)
+library(jsonlite)
+
+getDependency('sparkline')
+
+staticRender_cb <-
+  htmlwidgets::JS('function(){HTMLWidgets.staticRender();}')
+
+jhu_url1 <-
+  paste(
+    "https://raw.githubusercontent.com/CSSEGISandData/",
+    "COVID-19/master/csse_covid_19_data/",
+    "csse_covid_19_time_series/",
+    "time_series_19-covid-Confirmed.csv",
+    sep = ""
+  )
+jhu_url2 <-
+  paste(
+    "https://raw.githubusercontent.com/CSSEGISandData/",
+    "COVID-19/master/csse_covid_19_data/",
+    "csse_covid_19_time_series/",
+    "time_series_19-covid-Deaths.csv",
+    sep = ""
+  )
+jhu_url3 <-
+  paste(
+    "https://raw.githubusercontent.com/CSSEGISandData/",
+    "COVID-19/master/csse_covid_19_data/",
+    "csse_covid_19_time_series/",
+    "time_series_19-covid-Recovered.csv",
+    sep = ""
+  )
+g <- list(
+  projection     = list(type = 'orthographic'),
+  #winkel tripel orthographic
+  showland      = TRUE,
+  showlakes     = FALSE,
+  showrivers    = FALSE,
+  landcolor     = toRGB("gray95"),
+  subunitcolor  = toRGB("gray85"),
+  countrycolor  = toRGB("black"),
+  countrywidth  = 0.5,
+  subunitwidth  = 0.5,
+  showsubunits  = TRUE,
+  showcountries = TRUE,
+  resolution = 110,
+  lonaxis    = list(
+    showgrid = TRUE,
+    gridwidth = 0.5,
+    dtick = 5
+  ),
+  lataxis    = list(
+    showgrid = TRUE,
+    gridwidth = 0.5,
+    dtick = 5
+  )
+)
+```
+
+```{r, include=FALSE}
+gettimestamp <- reactive({
+  isolate({
+repo = "https://api.github.com/repos/CSSEGISandData/COVID-19/"
+path = "csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv&page=1&per_page=1"
+lastcommitdata<- jsonlite::fromJSON(paste0(repo,"commits?path=",path))
+lastcommitdate<- strptime(lastcommitdata$commit$author$date, "%Y-%m-%dT%H:%M:%S",tz = "UTC")
+})
+lastcommitdate
+})
+
+readdatadata <- reactive({
+  input$loaddata
+  isolate({
+    date <- today()
+    year <- lubridate::year(date)
+    url1 <- jhu_url1
+    path1 <- file.path(".", paste0("confirmed", date, ".csv"))
+    url2 <- jhu_url2
+    path2 <- file.path(".", paste0("deaths", date, ".csv"))
+    url3 <- jhu_url3
+    path3 <- file.path(".", paste0("recovered", date, ".csv"))
+    
+    #fileinfodata<- file.info(dir(path = ".", full.names = TRUE))
+    
+    withProgress(value = NULL, {
+      setProgress(message = "Downloading data...")
+      download.file(url1, path1)
+      download.file(url2, path2)
+      download.file(url3, path3)
+      
+      setProgress(message = "Parsing data...")
+      list(
+        read_csv(path1,  progress = FALSE),
+        read_csv(path2,  progress = FALSE),
+        read_csv(path3,  progress = FALSE)
+        
+      )
+    })
+    
+  })
+  
+})
+
+dataprocessed <- reactive({
+  req(readdatadata())
+  withProgress(value = NULL, {
+    setProgress(message = "computing stats...")
+    confirmed <- readdatadata()[[1]] %>%
+      rename(province = "Province/State",
+             country_region = "Country/Region") %>%
+      pivot_longer(
+        -c(province, country_region, Lat, Long),
+        names_to = "Date",
+        values_to = "cumulative_cases"
+      ) %>%
+      mutate(Date = mdy(Date)) %>%
+      arrange(country_region, province, Date) %>%
+      mutate(province = ifelse(is.na(province), "all", province)) %>%
+      group_by(country_region, province) %>%
+      mutate(incident_cases = c(0, diff(cumulative_cases))) %>%
+      ungroup()
+    
+    deaths <-  readdatadata()[[2]]  %>%
+      rename(province = "Province/State",
+             country_region = "Country/Region") %>%
+      pivot_longer(
+        -c(province, country_region, Lat, Long),
+        names_to = "Date",
+        values_to = "cumulative_deaths"
+      ) %>%
+      mutate(Date = mdy(Date)) %>%
+      arrange(country_region, province, Date) %>%
+      mutate(province = ifelse(is.na(province), "all", province)) %>%
+      group_by(country_region, province) %>%
+      mutate(incident_deaths = c(0, diff(cumulative_deaths))) %>%
+      ungroup()
+    
+    recovered <-  readdatadata()[[3]]  %>%
+      rename(province = "Province/State",
+             country_region = "Country/Region") %>%
+      pivot_longer(
+        -c(province, country_region, Lat, Long),
+        names_to = "Date",
+        values_to = "cumulative_recovered"
+      ) %>%
+      mutate(Date = mdy(Date)) %>%
+      arrange(country_region, province, Date) %>%
+      mutate(province = ifelse(is.na(province), "all", province)) %>%
+      group_by(country_region, province) %>%
+      mutate(incident_recovered = c(0, diff(cumulative_recovered))) %>%
+      ungroup()
+    alldata <- left_join(confirmed, deaths)
+    alldata <- left_join(alldata, recovered)
+    alldata$countryprovince <-
+      paste(alldata$country_region, alldata$province)
+  })
+  alldata %>%
+    filter(!str_detect(province, 'County|,'))
+  
+})
+
+colorlimits <- reactive({
+  c(0, max(dataprocessed()$cumulative_deaths)+10)
+})
+datasparkline <- eventReactive(input$computesparklines, {
+  withProgress(value = NULL, {
+    setProgress(message = "computing sparklines...")
+    cases_sparkline_data <-  data.table(dataprocessed())
+    keycols = c("countryprovince", "country_region", "province", "Date")
+    setkeyv(cases_sparkline_data, keycols)
+    cases_sparkline_data <- cases_sparkline_data[,
+                                                 .(
+                                                   cum_cases = spk_chr(cumulative_cases, type = "line"),
+                                                   cum_death = spk_chr(cumulative_deaths, type = "line"),
+                                                   cum_recovered = spk_chr(cumulative_recovered, type = "line")
+                                                 ),
+                                                 by = .(countryprovince, country_region, province)]
+    
+    my_alldata <- merge(
+        dataprocessed() %>%
+    group_by(country_region, province, countryprovince) %>%
+    filter(!str_detect(province, 'County|,')) %>%
+    slice(n()),
+      cases_sparkline_data,
+      by = c("countryprovince", "country_region", "province")
+    )
+  })
+  my_alldata[, c(2, 3, ncol(my_alldata) - 2, 7, ncol(my_alldata) - 1, 9, ncol(my_alldata), 11)]
+}, ignoreInit = TRUE)
+
+```
+
+Filters {.sidebar }
+=====================================
+```{r}
+column(12,
+uiOutput("loadbutton"),
+uiOutput("country"),
+uiOutput("province"),
+div(
+actionButton("computesparklines", "click for Sparklines/Mortality"),
+style="vertical-align: bottom")
+)
+output$loadbutton <- renderUI({
+actionBttn(inputId = "loaddata",
+           label = HTML(paste0("Latest jhu Data:<br/>",
+                               gettimestamp()," GMT<br/>",
+                               "Click to Refresh")),
+           color = "primary")
+  })
+
+output$country <- renderUI({
+  shiny::req(dataprocessed())
+  df <-  dataprocessed()
+  if (is.null(df)) {
+    return()
+  }
+  if (!is.null(df)) {
+    selectInput(
+      "Country",
+      label = "Filter Countries",
+      choices = levels(as.factor(df$country_region)),
+      multiple = T
+    )
+  }
+})
+output$province <- renderUI({
+  shiny::req(Data())
+  shiny::req(input$Country)
+  df <-  Data()
+  if (is.null(input$Country))
+    return()
+  if (!is.null(input$Country)) {
+    selectInput(
+      "Province",
+      label = "Filter Province/State",
+      choices = levels(as.factor(df$province)),
+      multiple = T,
+      selected = levels(as.factor(df$province))
+    )
+  }
+})
+Data  <- reactive({
+  req(dataprocessed())
+  df <-   dataprocessed()
+  if (is.null(input$Country)) {
+    return(df)
+  }
+  if (!is.null(input$Country)) {
+    df <- df %>% filter(country_region %in% input$Country)
+  }
+  df
+})
+
+
+Data2  <- reactive({
+  req(Data())
+  df <-   Data()
+  if (is.null(input$Country)) {
+    return(df)
+  }
+  if (is.null(input$Province)) {
+    return(df)
+  }
+  if (!is.null(input$Country) && !is.null(input$Province)) {
+    df <- df %>% filter(province %in% input$Province)
+  }
+  df
+})
+
+Data2last <- reactive({
+  Data2() %>%
+    group_by(country_region, province, countryprovince) %>%
+    filter(!str_detect(province, 'County|,')) %>%
+    slice(n())
+})
+Data3  <- reactive({
+  req(datasparkline())
+  df <-   as.data.frame(datasparkline())
+    if (is.null(input$Country)) {
+    return(df)
+  }
+  if (!is.null(input$Country)) {
+    df <- df %>% filter(country_region %in% input$Country)
+  }
+  if (is.null(input$Province)) {
+    return(df)
+  }
+  if (!is.null(input$Country) && !is.null(input$Province)) {
+    df <- df %>% filter(province %in% input$Province)
+  }
+  as.data.frame(df)
+})
+```
+
+> Link to: <a href="https://github.com/CSSEGISandData/COVID-19">jhu repo </a>
+
+Interactive Map 
+====================================
+
+
+Row {data-height=200}
+-------------------------------------
+
+### Total Cases {.value-box}
+
+```{r}
+output$vbox1 <- renderValueBox({
+  df <-  Data2last()
+  valueBox(sum(df[, "cumulative_cases"]) ,
+           icon = "fa-procedures", color = "primary")
+})
+valueBoxOutput("vbox1")
+```
+
+### Total Deaths {.value-box}
+
+```{r}
+output$vbox2 <- renderValueBox({
+  df <-  Data2last()
+  valueBox(sum(df[, "cumulative_deaths"]) ,
+           icon = "fa-calendar-times", color = "danger")
+})
+valueBoxOutput("vbox2")
+```
+
+### Total Recovered {.value-box}
+
+```{r}
+output$vbox3 <- renderValueBox({
+  df <-  Data2last()
+  tags$head(tags$style(HTML(".small-box {height: 100px}")))
+  valueBox(sum(df[, "cumulative_recovered"]) ,
+           icon = "fa-user-md", color = "success")
+})
+valueBoxOutput("vbox3")
+```
+
+
+Row {data-height=800}
+-------------------------------------
+
+### Interactive Map {data-width=600} 
+
+```{r}
+output$outfig <- renderPlotly({ 
+  req(Data2())
+  req(gettimestamp()) 
+  plot_geo(Data2last(), lat = ~ Lat, lon = ~ Long) %>% add_markers(
+    text = ~ paste(
+      country_region,
+      ifelse(province == "NA", "", province),
+      paste0("Cases:", cumulative_cases),
+      paste0("Deaths:", cumulative_deaths),
+      paste0("Recovered:", cumulative_recovered),
+      sep = "<br />"
+    ),
+    symbol = I("square"),
+    size = ~ cumulative_cases ,
+    color = ~ (cumulative_deaths + 0.0001),
+    hoverinfo = "text"
+  ) %>%
+    colorbar(title = "Cumulative Deaths<br /> ",
+             limits = colorlimits()) %>%
+    layout(
+      title = paste('Cumulative Covid-19 Cases on:', today()),
+      geo = g
+    )
+})
+plotlyOutput("outfig") #%>% shinycssloaders::withSpinner(type=1)
+
+```
+
+### Mortality Percentages For Selected Countries/Regions: {data-width=600} 
+
+```{r}
+output$lineplot = renderPlotly({
+  req(Data2())
+  req(gettimestamp()) 
+  df <-   Data2() %>% ungroup()
+  df$country_region <- factor(df$country_region)
+  df$country_region <- reorder(df$country_region, - df$cumulative_deaths)
+  df$country_region <- factor(df$country_region,
+                              labels =
+                                stringr::str_wrap(levels(df$country_region), 12))
+  
+  p <- ggplot(df,
+              aes(x = Date,
+                  y = cumulative_cases,
+                  group=countryprovince)) +
+    geom_line() +
+    theme_bw() +
+    labs(y = "Cases", x = "Date")
+  ggplotly(p) 
+})
+plotlyOutput("lineplot")
+```
+
+Row {data-height=400}
+-------------------------------------------- 
+
+### Data Sparklines: Selected Rows will appear in the Mortality Percentages Plot {data-width=600}
+
+```{r}
+uiOutput("dynamicsparktable")
+output$dynamicsparktable <- renderUI({ 
+  if (input$computesparklines) {
+output$sparktable<- DT::renderDataTable({
+  req(Data3())
+  req(gettimestamp()) 
+  spk_add_deps(
+    datatable(
+      as.data.frame(Data3()) %>% 
+        arrange(desc(cumulative_cases),
+                desc(cumulative_deaths)),
+      filter = 'none',
+      escape = FALSE,
+      selection = list(
+        target = "row",
+        mode = 'multiple',
+        selected = c(1,2,3,4,5)
+      ),
+      extensions = c('Buttons'), #c('Select', 'Buttons')
+      options = list(
+        dom = 'lfrtiBp',
+        pageLength = 5 ,
+        lengthMenu = list(c(5, 10, 15,-1), c('5', '10', '15', 'All')),
+        #select = list(style = 'os', items = 'row'),
+        #buttons = c('selectAll', 'selectNone', 'selectRows'),
+        autoWidth = FALSE,
+        scrollX = TRUE,
+        scrollY = TRUE,
+        target = 'row',
+        drawCallback   = staticRender_cb,
+        fnDrawCallback = staticRender_cb,
+        #order = list(list(4, 'desc'), list(6, 'desc')),
+        columns = list(
+          list(title = ''),
+          list(title = 'Country'),
+          list(title = 'Province/State'),
+          list(title = 'Cases Over Time'),
+          list(title = 'Total Cases'),
+          list(title = 'Deaths Over Time'),
+          list(title = 'Total Deaths'),
+          list(title = 'Recovered Over Time'),
+          list(title = 'Total Recovered')
+        )
+      )
+    )
+  )
+})
+dataTableOutput("sparktable")
+}
+  else NULL
+})
+```
+
+### Mortality Percentages For Selected Countries/Regions: {data-width=600} 
+
+```{r}
+output$mortalityratioplot = renderPlotly({
+  req(Data3()) 
+  req(gettimestamp()) 
+    df <-  as.data.frame(Data3()) %>% 
+        arrange(desc(cumulative_cases),
+                desc(cumulative_deaths))%>%
+    mutate(MortalityRatio = ifelse(
+      cumulative_cases > 0,
+      100 * (cumulative_deaths / cumulative_cases),
+      0
+    ))
+  df$country_region <- factor(df$country_region)
+  df$country_region <- reorder(df$country_region, - df$MortalityRatio)
+  df$country_regionl <- factor(df$country_region,
+                              labels =
+                                stringr::str_wrap(levels(df$country_region), 12))
+  s1 = input$sparktable_rows_selected  # rows on the current page
+  df <- df[if( nrow(df)< max(s1) ) c(1:nrow(df)%in%s1) else s1 , , drop = FALSE]
+  p <- ggplot(df,
+              aes(x = country_regionl,
+                  group = province,
+                  y = MortalityRatio,
+                  size = cumulative_cases)) +
+    geom_col() +
+    theme_bw() +
+    labs(y = "Mortality Ratio", x = "Country/Region")
+  
+  ggplotly(p) #layout(xaxis = list(range = c(1,5)))
+  
+  
+})
+plotlyOutput("mortalityratioplot")
+```
+
+Data
+====================================
+
+Datatables {.tabset}
+------------------------------------
+
+
+
+### All Data 
+
+```{r}
+DT::renderDataTable({
+  datatable(
+    as.data.frame(Data2()[, 1:11]),
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(
+              dom = 'lBfrtip',
+        pageLength = 10 ,
+        lengthMenu = list(c(5, 10, 15,-1), c('5', '10', '15', 'All')),
+        buttons = list(
+          list(
+            extend = "csv",
+            text = "Download Current Page",
+            filename = "page",
+            exportOptions = list(modifier = list(page = "current"))
+          ),
+          list(
+            extend = "csv",
+            text = "Download Full Results",
+            filename = "data",
+            exportOptions = list(modifier = list(page = "all"))
+          )
+        ),
+      autoWidth = FALSE,
+      scrollX = TRUE,
+      scrollY = TRUE,
+      columns = list(
+        list(title = ''),
+        list(title = 'Province/State'),
+        list(title = 'Country'),
+        list(title = 'Lat'),
+        list(title = 'Long'),
+        list(title = 'Date'),
+        list(title = 'Cumulative Cases'),
+        list(title = 'Incident Cases'),
+        list(title = 'Cumulative Deaths'),
+        list(title = 'Incident Deaths'),
+        list(title = 'Cumulative Recovered'),
+        list(title = 'Incident Recovered')
+      )
+  )
+  )
+})
+```
+
