@@ -297,7 +297,7 @@ Data3  <- reactive({
 })
 ```
 
-> Link to: <a href="https://github.com/CSSEGISandData/COVID-19">jhu repo </a>
+> Link to: <a href="https://github.com/CSSEGISandData/COVID-19" target="_blank">jhu repo </a>
 
 Interactive Map 
 ====================================
@@ -510,7 +510,7 @@ output$mortalityratioplot = renderPlotly({
                   group = province,
                   y = MortalityRatio,
                   size = cumulative_cases)) +
-    geom_col() +
+    geom_col(position = position_dodge2()) +
     theme_bw() +
     labs(y = "Mortality Ratio", x = "Country/Region")
   
