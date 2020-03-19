@@ -71,9 +71,7 @@ lastcommitdate<- strptime(lastcommitdata$commit$author$date, "%Y-%m-%dT%H:%M:%S"
 lastcommitdate
 })
 
-readdatadata <- reactive({
-  input$loaddata
-  isolate({
+readdatadata <-eventReactive(input$loaddata, {
     date <- today()
     year <- lubridate::year(date)
     url1 <- jhu_url1
@@ -82,9 +80,6 @@ readdatadata <- reactive({
     path2 <- file.path(".", paste0("deaths", date, ".csv"))
     url3 <- jhu_url3
     path3 <- file.path(".", paste0("recovered", date, ".csv"))
-    
-    #fileinfodata<- file.info(dir(path = ".", full.names = TRUE))
-    
     withProgress(value = NULL, {
       setProgress(message = "Downloading data...")
       download.file(url1, path1)
@@ -99,10 +94,7 @@ readdatadata <- reactive({
         
       )
     })
-    
-  })
-  
-})
+},ignoreInit = FALSE, ignoreNULL = FALSE)
 
 dataprocessed <- reactive({
   req(readdatadata())
@@ -352,7 +344,7 @@ valueBoxOutput("vbox3")
 Row {data-height=800}
 -------------------------------------
 
-### Interactive Map {data-width=600} 
+### Map: Use Interactive Controls for Pan/Zoom/Hover {data-width=600} 
 
 ```{r}
 output$outfig <- renderPlotly({ 
@@ -408,7 +400,7 @@ plotlyOutput("outfig") #%>% shinycssloaders::withSpinner(type=1)
 
 ```
 
-### Mortality Percentages For Selected Countries/Regions: {data-width=600} 
+### Raw Cases Numbers Over Time For Selected Countries/Regions: {data-width=600} 
 
 ```{r}
 output$lineplot = renderPlotly({
@@ -436,7 +428,7 @@ plotlyOutput("lineplot")
 Row {data-height=400}
 -------------------------------------------- 
 
-### Data Sparklines: Selected Rows will appear in the Mortality Percentages Plot {data-width=600}
+### Sparklines: Selected Rows are shown on the Mortality Plot {data-width=600}
 
 ```{r}
 uiOutput("dynamicsparktable")
@@ -508,13 +500,13 @@ output$mortalityratioplot = renderPlotly({
     ))
   df$country_region <- factor(df$country_region)
   df$country_region <- reorder(df$country_region, - df$MortalityRatio)
-  df$country_regionl <- factor(df$country_region,
+  df$country_region <- factor(df$country_region,
                               labels =
                                 stringr::str_wrap(levels(df$country_region), 12))
   s1 = input$sparktable_rows_selected  # rows on the current page
   df <- df[if( nrow(df)< max(s1) ) c(1:nrow(df)%in%s1) else s1 , , drop = FALSE]
   p <- ggplot(df,
-              aes(x = country_regionl,
+              aes(x = country_region,
                   group = province,
                   y = MortalityRatio,
                   size = cumulative_cases)) +
@@ -536,13 +528,12 @@ Datatables {.tabset}
 ------------------------------------
 
 
-
 ### All Data 
 
 ```{r}
-DT::renderDataTable({
+DT::renderDT ({
   datatable(
-    as.data.frame(Data2()[, 1:11]),
+    as.data.frame(Data()[, 1:11]),
     filter = 'top',
     extensions = 'Buttons',
     options = list(
@@ -553,13 +544,13 @@ DT::renderDataTable({
           list(
             extend = "csv",
             text = "Download Current Page",
-            filename = "page",
+            filename = paste0("pagedata",today()),
             exportOptions = list(modifier = list(page = "current"))
           ),
           list(
             extend = "csv",
             text = "Download Full Results",
-            filename = "data",
+            filename = paste0("fulldata",today()),
             exportOptions = list(modifier = list(page = "all"))
           )
         ),
@@ -582,6 +573,5 @@ DT::renderDataTable({
       )
   )
   )
-})
+},server = FALSE)
 ```
-
