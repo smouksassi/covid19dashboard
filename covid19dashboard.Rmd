@@ -352,7 +352,8 @@ output$outfig <- renderPlotly({
   req(gettimestamp()) 
   
   g <- list(
-  projection     = list(type = input$mapproj),
+  projection    = list(type = input$mapproj),
+  fitbounds     = "locations",
   showland      = TRUE,
   showlakes     = FALSE,
   showrivers    = FALSE,
