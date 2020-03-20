@@ -72,7 +72,7 @@ lastcommitdate
 })
 
 readdatadata <-eventReactive(input$loaddata, {
-    date <- today()
+    date <- lubridate::today()
     year <- lubridate::year(date)
     url1 <- jhu_url1
     path1 <- file.path(".", paste0("confirmed", date, ".csv"))
@@ -149,9 +149,9 @@ dataprocessed <- reactive({
     alldata$countryprovince <-
       paste(alldata$country_region, alldata$province)
   })
-  alldata %>%
+  alldata <- alldata %>%
     filter(!str_detect(province, 'County|,'))
-  
+  alldata
 })
 
 colorlimits <- reactive({
@@ -174,7 +174,6 @@ datasparkline <- eventReactive(input$computesparklines, {
     my_alldata <- merge(
         dataprocessed() %>%
     group_by(country_region, province, countryprovince) %>%
-    filter(!str_detect(province, 'County|,')) %>%
     slice(n()),
       cases_sparkline_data,
       by = c("countryprovince", "country_region", "province")
@@ -509,9 +508,8 @@ output$mortalityratioplot = renderPlotly({
   p <- ggplot(df,
               aes(x = country_region,
                   group = province,
-                  y = MortalityRatio,
-                  size = cumulative_cases)) +
-    geom_col(position = position_dodge2()) +
+                  y = MortalityRatio)) +
+    geom_col(position = position_dodge()) +
     theme_bw() +
     labs(y = "Mortality Ratio", x = "Country/Region")
   
