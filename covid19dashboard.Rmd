@@ -310,7 +310,7 @@ Row {data-height=200}
 ```{r}
 output$vbox1 <- renderValueBox({
   df <-  Data2last()
-  valueBox(sum(df[, "cumulative_cases"]) ,
+  valueBox(sum(df[, "cumulative_cases"],na.rm=TRUE) ,
            icon = "fa-procedures", color = "primary")
 })
 valueBoxOutput("vbox1")
@@ -321,7 +321,7 @@ valueBoxOutput("vbox1")
 ```{r}
 output$vbox2 <- renderValueBox({
   df <-  Data2last()
-  valueBox(sum(df[, "cumulative_deaths"]) ,
+  valueBox(sum(df[, "cumulative_deaths"],na.rm=TRUE) ,
            icon = "fa-calendar-times", color = "danger")
 })
 valueBoxOutput("vbox2")
@@ -333,7 +333,7 @@ valueBoxOutput("vbox2")
 output$vbox3 <- renderValueBox({
   df <-  Data2last()
   tags$head(tags$style(HTML(".small-box {height: 100px}")))
-  valueBox(sum(df[, "cumulative_recovered"]) ,
+  valueBox(sum(df[, "cumulative_recovered"],na.rm=TRUE) ,
            icon = "fa-user-md", color = "success")
 })
 valueBoxOutput("vbox3")
