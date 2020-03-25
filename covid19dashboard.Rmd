@@ -37,19 +37,13 @@ repopath <-
     "COVID-19/master/csse_covid_19_data/",
     "csse_covid_19_time_series/"
   )
-jhu_url1 <- paste0(repopath, "time_series_19-covid-Confirmed.csv")
-jhu_url2 <- paste0(repopath, "time_series_19-covid-Deaths.csv")
-jhu_url3 <- paste0(repopath, "time_series_19-covid-Recovered.csv")
 jhu_url4 <- paste0(repopath, "time_series_covid19_confirmed_global.csv")
 jhu_url5 <- paste0(repopath, "time_series_covid19_deaths_global.csv")
 date  <- lubridate::today()
-path1 <- file.path(".", paste0("confirmed", date, ".csv"))
-path2 <- file.path(".", paste0("deaths", date, ".csv"))
-path3 <- file.path(".", paste0("recovered", date, ".csv"))
 path4 <- file.path(".", paste0("confirmed_global", date, ".csv"))
 path5 <- file.path(".", paste0("deaths_global", date, ".csv"))
 repo = "https://api.github.com/repos/CSSEGISandData/COVID-19/"
-path = "csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv&page=1&per_page=1"
+path = "csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv&page=1&per_page=1"
 lastcommitdata <- jsonlite::fromJSON(paste0(repo, "commits?path=", path))
 lastcommitdate <- strptime(lastcommitdata$commit$author$date,"%Y-%m-%dT%H:%M:%S",tz = "UTC")
 
@@ -60,16 +54,10 @@ readdatadata <- eventReactive(input$loaddata,
                               {
                                 withProgress(value = NULL, {
                                   setProgress(message = "Downloading data...")
-                                  download.file(jhu_url1, path1)
-                                  download.file(jhu_url2, path2)
-                                  download.file(jhu_url3, path3)
                                   download.file(jhu_url4, path4)
                                   download.file(jhu_url5, path5)
                                   setProgress(message = "Parsing data...")
                                   list(
-                                    read_csv(path1,  progress = FALSE),
-                                    read_csv(path2,  progress = FALSE),
-                                    read_csv(path3,  progress = FALSE),
                                     read_csv(path4,  progress = FALSE),
                                     read_csv(path5,  progress = FALSE)
                                   )
@@ -111,23 +99,8 @@ dataprocessed <- reactive({
       group_by(country_region, province) %>%
       mutate(incident_deaths = c(0, diff(cumulative_deaths))) %>%
       ungroup()
-    
-    recovered <-  readdatadata()[[3]]  %>%
-      rename(province = "Province/State",
-             country_region = "Country/Region") %>%
-      pivot_longer(
-        -c(province, country_region, Lat, Long),
-        names_to = "Date",
-        values_to = "cumulative_recovered"
-      ) %>%
-      mutate(Date = mdy(Date)) %>%
-      arrange(country_region, province, Date) %>%
-      mutate(province = ifelse(is.na(province), "all", province)) %>%
-      group_by(country_region, province) %>%
-      mutate(incident_recovered = c(0, diff(cumulative_recovered))) %>%
-      ungroup()
+
     alldata <- left_join(confirmed, deaths)
-    alldata <- left_join(alldata, recovered)
     alldata$countryprovince <-
       paste(alldata$country_region, alldata$province)
   })
@@ -148,11 +121,9 @@ datasparkline <- eventReactive(input$computesparklines, {
     cases_sparkline_data <- cases_sparkline_data[,
                                                  .(
                                                    cum_cases = spk_chr(cumulative_cases, type = "line"),
-                                                   cum_death = spk_chr(cumulative_deaths, type = "line"),
-                                                   cum_recovered = spk_chr(cumulative_recovered, type = "line")
+                                                   cum_death = spk_chr(cumulative_deaths, type = "line")
                                                  ),
                                                  by = .(countryprovince, country_region, province)]
-    
     my_alldata <- merge(
       dataprocessed() %>%
         group_by(country_region, province, countryprovince) %>%
@@ -161,14 +132,11 @@ datasparkline <- eventReactive(input$computesparklines, {
       by = c("countryprovince", "country_region", "province")
     )
   })
-  my_alldata[, c(2,
-                 3,
-                 ncol(my_alldata) - 2,
-                 7,
-                 ncol(my_alldata) - 1,
-                 9,
-                 ncol(my_alldata),
-                 11)]
+  my_alldata[, c("country_region", "province",
+                 "cum_cases",
+                 "cumulative_cases",
+                 "cum_death",
+                 "cumulative_deaths")]
 }, ignoreInit = TRUE)
 ```
 
@@ -315,18 +283,6 @@ output$vbox2 <- renderValueBox({
 valueBoxOutput("vbox2")
 ```
 
-### Total Recovered {.value-box}
-
-```{r}
-output$vbox3 <- renderValueBox({
-  df <-  Data2last()
-  tags$head(tags$style(HTML(".small-box {height: 100px}")))
-  valueBox(sum(df[, "cumulative_recovered"],na.rm=TRUE) ,
-           icon = "fa-user-md", color = "success")
-})
-valueBoxOutput("vbox3")
-```
-
 
 Row {data-height=800}
 -------------------------------------
@@ -367,7 +323,6 @@ output$outfig <- renderPlotly({
       ifelse(province == "NA", "", province),
       paste0("Cases:", cumulative_cases),
       paste0("Deaths:", cumulative_deaths),
-      paste0("Recovered:", cumulative_recovered),
       sep = "<br />"
     ),
     symbol = I("square"),
@@ -420,9 +375,11 @@ output$dynamicsparktable <- renderUI({
   if (input$computesparklines) {
 output$sparktable<- DT::renderDataTable({
   req(Data3())
+  df<- as.data.frame(Data3())
+  print(names(df))
   spk_add_deps(
     datatable(
-      as.data.frame(Data3()) %>% 
+      df %>% 
         arrange(desc(cumulative_cases),
                 desc(cumulative_deaths)),
       filter = 'none',
@@ -453,9 +410,7 @@ output$sparktable<- DT::renderDataTable({
           list(title = 'Cases Over Time'),
           list(title = 'Total Cases'),
           list(title = 'Deaths Over Time'),
-          list(title = 'Total Deaths'),
-          list(title = 'Recovered Over Time'),
-          list(title = 'Total Recovered')
+          list(title = 'Total Deaths')
         )
       )
     )
@@ -514,7 +469,7 @@ Datatables {.tabset}
 ```{r}
 DT::renderDT ({
   datatable(
-    as.data.frame(Data()[, 1:11]),
+    as.data.frame(Data()[, 1:9]),
     filter = 'top',
     extensions = 'Buttons',
     options = list(
@@ -548,9 +503,7 @@ DT::renderDT ({
         list(title = 'Cumulative Cases'),
         list(title = 'Incident Cases'),
         list(title = 'Cumulative Deaths'),
-        list(title = 'Incident Deaths'),
-        list(title = 'Cumulative Recovered'),
-        list(title = 'Incident Recovered')
+        list(title = 'Incident Deaths')
       )
   )
   )
