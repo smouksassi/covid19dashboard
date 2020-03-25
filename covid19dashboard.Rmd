@@ -3,6 +3,8 @@ title: "COVID-19: Cases Dashboard"
 runtime: shiny
 output: 
   flexdashboard::flex_dashboard:
+    source_code: "https://github.com/smouksassi/covid19dashboard"
+    social: [ "twitter", "facebook", "linkedin" ]
     orientation: rows
     vertical_layout: fill
     theme: spacelab
@@ -252,7 +254,9 @@ Data3  <- reactive({
 })
 ```
 
-> Link to: <a href="https://github.com/CSSEGISandData/COVID-19" target="_blank">jhu repo </a>
+
+> Link to: <a href="https://github.com/CSSEGISandData/COVID-19" target="_blank">jhu data source repo </a>
+
 
 Cases Map
 ====================================
