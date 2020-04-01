@@ -41,9 +41,11 @@ repopath <-
   )
 jhu_url4 <- paste0(repopath, "time_series_covid19_confirmed_global.csv")
 jhu_url5 <- paste0(repopath, "time_series_covid19_deaths_global.csv")
+jhu_url6 <- paste0(repopath, "time_series_covid19_recovered_global.csv")
 date  <- lubridate::today()
 path4 <- file.path(".", paste0("confirmed_global", date, ".csv"))
 path5 <- file.path(".", paste0("deaths_global", date, ".csv"))
+path6 <- file.path(".", paste0("recovered_global", date, ".csv"))
 repo = "https://api.github.com/repos/CSSEGISandData/COVID-19/"
 path = "csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv&page=1&per_page=1"
 lastcommitdata <- jsonlite::fromJSON(paste0(repo, "commits?path=", path))
@@ -58,10 +60,12 @@ readdatadata <- eventReactive(input$loaddata,
                                   setProgress(message = "Downloading data...")
                                   download.file(jhu_url4, path4)
                                   download.file(jhu_url5, path5)
+                                  download.file(jhu_url6, path6)
                                   setProgress(message = "Parsing data...")
                                   list(
                                     read_csv(path4,  progress = FALSE),
-                                    read_csv(path5,  progress = FALSE)
+                                    read_csv(path5,  progress = FALSE),
+                                    read_csv(path6,  progress = FALSE)
                                   )
                                 })
                               },
@@ -101,13 +105,30 @@ dataprocessed <- reactive({
       group_by(country_region, province) %>%
       mutate(incident_deaths = c(0, diff(cumulative_deaths))) %>%
       ungroup()
+    
+    recovered <-  readdatadata()[[3]]  %>%
+      rename(province = "Province/State",
+             country_region = "Country/Region") %>%
+      pivot_longer(
+        -c(province, country_region, Lat, Long),
+        names_to = "Date",
+        values_to = "cumulative_recovered"
+      ) %>%
+      mutate(Date = mdy(Date)) %>%
+      arrange(country_region, province, Date) %>%
+      mutate(province = ifelse(is.na(province), "all", province)) %>%
+      group_by(country_region, province) %>%
+      mutate(incident_recovered = c(0, diff(cumulative_recovered))) %>%
+      ungroup()
 
     alldata <- left_join(confirmed, deaths)
+    alldata <- left_join(alldata,recovered)
     alldata$countryprovince <-
       paste(alldata$country_region, alldata$province)
   })
   alldata <- alldata %>%
-    filter(!str_detect(province, 'County|,'))
+    filter(!str_detect(province, 'County|,'))%>%
+    filter(!str_detect(province, 'recovered|Recovered'))
   alldata
 })
 
@@ -232,7 +253,6 @@ Data2  <- reactive({
 Data2last <- reactive({
   Data2() %>%
     group_by(country_region, province, countryprovince) %>%
-    filter(!str_detect(province, 'County|,')) %>%
     slice(n())
 })
 Data3  <- reactive({
@@ -287,6 +307,16 @@ output$vbox2 <- renderValueBox({
 valueBoxOutput("vbox2")
 ```
 
+### Total Recovered {.value-box}
+
+```{r}
+output$vbox3 <- renderValueBox({
+  df <-  Data2last()
+  valueBox(sum(df[, "cumulative_recovered"],na.rm=TRUE) ,
+           icon = "fa-user-md", color = "success")
+})
+valueBoxOutput("vbox3")
+```
 
 Row {data-height=800}
 -------------------------------------
@@ -355,11 +385,13 @@ output$lineplot = renderPlotly({
   df$country_region <- factor(df$country_region,
                               labels =
                                 stringr::str_wrap(levels(df$country_region), 12))
-  
+
+  df$`Country Province`<-df$countryprovince
+  df$`Cumulative Cases`<- df$cumulative_cases
   p <- ggplot(df,
               aes(x = Date,
-                  y = cumulative_cases,
-                  group=countryprovince)) +
+                  y = `Cumulative Cases`,
+                  group=`Country Province`)) +
     geom_line() +
     theme_bw() +
     labs(y = "Cases", x = "Date")
@@ -446,10 +478,14 @@ output$mortalityratioplot = renderPlotly({
                                 stringr::str_wrap(levels(df$country_region), 12))
   s1 = input$sparktable_rows_selected  # rows on the current page
   df <- df[if( nrow(df)< max(s1) ) c(1:nrow(df)%in%s1) else s1 , , drop = FALSE]
+  df$Country <- df$country_region
+  df$Province<-df$province
+  df$`Mortality Ratio`<- df$MortalityRatio
+  
   p <- ggplot(df,
-              aes(x = country_region,
-                  group = province,
-                  y = MortalityRatio)) +
+              aes(x = Country,
+                  group = Province,
+                  y = `Mortality Ratio`)) +
     geom_col(position = position_dodge()) +
     theme_bw() +
     labs(y = "Mortality Ratio", x = "Country/Region")
@@ -472,8 +508,10 @@ Datatables {.tabset}
 
 ```{r}
 DT::renderDT ({
+  print(head(as.data.frame(Data2()[, ])))
+  
   datatable(
-    as.data.frame(Data()[, 1:9]),
+    as.data.frame(Data2()[, 1:11]),
     filter = 'top',
     extensions = 'Buttons',
     options = list(
@@ -507,7 +545,9 @@ DT::renderDT ({
         list(title = 'Cumulative Cases'),
         list(title = 'Incident Cases'),
         list(title = 'Cumulative Deaths'),
-        list(title = 'Incident Deaths')
+        list(title = 'Incident Deaths'),
+        list(title = 'Cumulative Recovered'),
+        list(title = 'Incident Recovered')
       )
   )
   )
