@@ -425,7 +425,7 @@ output$sparktable<- DT::renderDataTable({
         mode = 'multiple',
         selected = c(1,2,3,4,5)
       ),
-      extensions = c('Buttons'), #c('Select', 'Buttons')
+      extensions = c('Buttons','Select'), #c('Select', 'Buttons')
       options = list(
         dom = 'lfrtiBp',
         pageLength = 5 ,
